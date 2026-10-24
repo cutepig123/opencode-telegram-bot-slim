@@ -215,22 +215,26 @@ export function getBrowserRootPaths(): string[] {
 export function isWithinAllowedRoot(targetPath: string): boolean {
   const normalizedTarget = normalizePath(targetPath);
 
-  for (const root of getBrowserRoots()) {
+  return getBrowserRoots().some((root) => {
     const normalizedRoot = normalizePath(root);
 
     if (normalizedTarget === normalizedRoot) {
       return true;
     }
 
-    if (
-      normalizedTarget.startsWith(normalizedRoot + "/") ||
-      normalizedTarget.startsWith(normalizedRoot + "\\")
-    ) {
+    if (!normalizedTarget.startsWith(normalizedRoot)) {
+      return false;
+    }
+
+    // A drive root already ends with a separator ("C:\"), so appending another one
+    // built "C:\\" and every child looked like it was outside the root.
+    if (/[\\/]$/.test(normalizedRoot)) {
       return true;
     }
-  }
 
-  return false;
+    const nextChar = normalizedTarget[normalizedRoot.length];
+    return nextChar === "/" || nextChar === "\\";
+  });
 }
 
 export async function isWithinAllowedRootSafe(targetPath: string): Promise<boolean> {

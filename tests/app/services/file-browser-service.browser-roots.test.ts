@@ -144,6 +144,26 @@ describe("browser-roots", () => {
       expect(isWithinAllowedRoot("/etc/config")).toBe(false);
     });
 
+    // The first Windows drive root a user is likely to configure is "C:\". A prefix
+    // compare built "C:\\" and rejected every child, so /files and /open could enter
+    // a drive but not descend into it.
+    it("should return true for a descendant of a drive root", () => {
+      initBrowserRoots("C:\\");
+      expect(isWithinAllowedRoot("C:\Temp")).toBe(true);
+      expect(isWithinAllowedRoot("C:\Temp\com")).toBe(true);
+      expect(isWithinAllowedRoot("C:\\")).toBe(true);
+    });
+
+    it("should not treat another drive as a descendant of a drive root", () => {
+      initBrowserRoots("C:\\");
+      expect(isWithinAllowedRoot("D:\temp2")).toBe(false);
+    });
+
+    it("should return false for a sibling folder that shares the drive-root prefix", () => {
+      initBrowserRoots("C:\Temp");
+      expect(isWithinAllowedRoot("C:\Temporary")).toBe(false);
+    });
+
     it("should match case-insensitively on Windows", () => {
       Object.defineProperty(process, "platform", { value: "win32" });
       __resetBrowserRootsForTests();
