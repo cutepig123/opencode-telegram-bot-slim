@@ -10,6 +10,7 @@ import {
 import {
   getRemoteFileDetails,
   scanRemoteDirectory,
+  type RemoteDeleteTarget,
   type RemoteFileEntry,
   type TextFilePreview,
 } from "../../app/services/remote-files-service.js";
@@ -24,6 +25,9 @@ export const FILES_CALLBACK_FILE_PREFIX = "files:file:";
 export const FILES_CALLBACK_BACK_PREFIX = "files:back:";
 export const FILES_CALLBACK_DOWNLOAD_PREFIX = "files:download:";
 export const FILES_CALLBACK_PREVIEW_PREFIX = "files:preview:";
+export const FILES_CALLBACK_DELETE_PREFIX = "files:delete:";
+export const FILES_CALLBACK_DELETE_CONFIRM_PREFIX = "files:delok:";
+export const FILES_CALLBACK_DELETE_CANCEL_PREFIX = "files:delno:";
 
 // Telegram rejects bot uploads above this size; sendDownloadedFile enforces the same cap.
 export const MAX_DOWNLOAD_SIZE_KB = 50 * 1024;
@@ -129,6 +133,22 @@ export function decodeFilesPreviewCallback(data: string): { path: string; page: 
   return decodePathWithPage(data, FILES_CALLBACK_PREVIEW_PREFIX);
 }
 
+export function decodeFilesDeleteCallback(data: string): { path: string; page: number } | null {
+  return decodePathWithPage(data, FILES_CALLBACK_DELETE_PREFIX);
+}
+
+export function decodeFilesDeleteConfirmCallback(
+  data: string,
+): { path: string; page: number } | null {
+  return decodePathWithPage(data, FILES_CALLBACK_DELETE_CONFIRM_PREFIX);
+}
+
+export function decodeFilesDeleteCancelCallback(
+  data: string,
+): { path: string; page: number } | null {
+  return decodePathWithPage(data, FILES_CALLBACK_DELETE_CANCEL_PREFIX);
+}
+
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
@@ -175,11 +195,19 @@ function buildBrowseKeyboard(
 
   for (const entry of entries) {
     const label = truncateLabel(buildEntryLabel(entry));
-    const callbackData =
-      entry.type === "directory"
-        ? encodePath(FILES_CALLBACK_NAV_PREFIX, entry.fullPath)
-        : encodePathWithPage(FILES_CALLBACK_FILE_PREFIX, entry.fullPath, page);
-    keyboard.text(label, callbackData).row();
+    if (entry.type === "directory") {
+      // Folders get their own delete button in the same row: tapping a file already
+      // opens a details screen that carries one, folders have no such screen.
+      keyboard
+        .text(label, encodePath(FILES_CALLBACK_NAV_PREFIX, entry.fullPath))
+        .text("🗑", encodePathWithPage(FILES_CALLBACK_DELETE_PREFIX, entry.fullPath, page))
+        .row();
+      continue;
+    }
+
+    keyboard
+      .text(label, encodePathWithPage(FILES_CALLBACK_FILE_PREFIX, entry.fullPath, page))
+      .row();
   }
 
   if (parentPath !== null) {
@@ -263,6 +291,9 @@ function buildFileDetailsKeyboard(
     keyboard.text(t("files.download"), encodePath(FILES_CALLBACK_DOWNLOAD_PREFIX, filePath)).row();
   }
   keyboard
+    .text(t("files.delete"), encodePathWithPage(FILES_CALLBACK_DELETE_PREFIX, filePath, page))
+    .row();
+  keyboard
     .text(
       t("ls.file.back"),
       encodePathWithPage(FILES_CALLBACK_BACK_PREFIX, getParentPath(filePath), page),
@@ -338,4 +369,43 @@ export function buildFilesPreviewKeyboard(
 
   appendInlineMenuCancelButton(keyboard, "files");
   return keyboard;
+}
+
+export function buildFilesDeleteConfirmKeyboard(entryPath: string, page: number): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+
+  keyboard
+    .text(
+      t("files.delete_confirm_yes"),
+      encodePathWithPage(FILES_CALLBACK_DELETE_CONFIRM_PREFIX, entryPath, page),
+    )
+    .row();
+  keyboard
+    .text(
+      t("files.delete_confirm_no"),
+      encodePathWithPage(FILES_CALLBACK_DELETE_CANCEL_PREFIX, entryPath, page),
+    )
+    .row();
+
+  return keyboard;
+}
+
+export function buildFilesDeleteConfirmText(entryPath: string, target: RemoteDeleteTarget): string {
+  const name = getBaseName(entryPath);
+  const kind =
+    target === "directory" ? t("files.delete_kind_directory") : t("files.delete_kind_file");
+
+  return (
+    `⚠️ ${t("files.delete_title")}
+
+` +
+    `${t("files.delete_kind")}: ${kind}
+` +
+    `<code>${escapeHtml(name)}</code>
+` +
+    `${t("files.path")}: <code>${escapeHtml(pathToDisplayPath(entryPath))}</code>
+
+` +
+    t("files.delete_warning")
+  );
 }

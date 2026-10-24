@@ -16,6 +16,7 @@ import {
 } from "../../../src/app/services/file-browser-service.js";
 import {
   clearFilesPathIndex,
+  decodeFilesDeleteCallback,
   decodeFilesDownloadCallback,
   decodeFilesFileCallback,
   decodeFilesNavCallback,
@@ -65,13 +66,21 @@ describe("bot/menus/remote-files-menu", () => {
       throw new Error(view.error);
     }
 
-    const buttons = view.keyboard.inline_keyboard.flat();
-    expect(buttonTexts(view.keyboard)).toEqual(["📁 docs", "📄 readme.txt · 5B", "❌ Cancel"]);
+    const rows = view.keyboard.inline_keyboard;
+    // A folder row carries its own delete button, so it reads [label, trash].
+    const folderRow = rows[0] ?? [];
+    expect(folderRow[0]?.text).toBe("📁 docs");
+    expect(folderRow[1]?.text).toBe("🗑");
 
-    const dirCallback = buttons[0] ? callbackData(buttons[0]) : "";
+    const dirCallback = folderRow[0] ? callbackData(folderRow[0]) : "";
     expect(decodeFilesNavCallback(dirCallback)).toBe(path.join(rootDir, "docs"));
+    expect(decodeFilesDeleteCallback(folderRow[1] ? callbackData(folderRow[1]) : "")?.path).toBe(
+      path.join(rootDir, "docs"),
+    );
 
-    const fileCallback = buttons[1] ? callbackData(buttons[1]) : "";
+    const fileRow = rows.find((row) => row[0]?.text.startsWith("📄 readme.txt")) ?? [];
+    expect(fileRow[0]?.text).toBe("📄 readme.txt · 5B");
+    const fileCallback = fileRow[0] ? callbackData(fileRow[0]) : "";
     const decoded = decodeFilesFileCallback(fileCallback);
     expect(decoded?.path).toBe(path.join(rootDir, "readme.txt"));
     expect(decoded?.page).toBe(0);

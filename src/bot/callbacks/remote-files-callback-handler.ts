@@ -1,7 +1,9 @@
 import type { Context } from "grammy";
-import { isWithinAllowedRootSafe } from "../../app/services/file-browser-service.js";
+import { getParentPath, isWithinAllowedRootSafe } from "../../app/services/file-browser-service.js";
 import {
   clearRemoteDirectory,
+  deleteRemoteEntry,
+  getRemoteDeleteTarget,
   getRemoteFileDetails,
   readTextFilePreview,
   rememberRemoteDirectory,
@@ -21,11 +23,16 @@ import {
 } from "../menus/inline-menu.js";
 import { sendDownloadedFile } from "../messages/send-downloaded-file.js";
 import {
+  buildFilesDeleteConfirmKeyboard,
+  buildFilesDeleteConfirmText,
   buildFilesPreviewKeyboard,
   buildFilesPreviewText,
   buildFilesRootsKeyboard,
   clearFilesPathIndex,
   decodeFilesBackCallback,
+  decodeFilesDeleteCallback,
+  decodeFilesDeleteCancelCallback,
+  decodeFilesDeleteConfirmCallback,
   decodeFilesDownloadCallback,
   decodeFilesFileCallback,
   decodeFilesNavCallback,
@@ -124,6 +131,36 @@ export async function handleFilesCallback(ctx: Context, deps: FilesCallbackDeps)
       return true;
     }
 
+    const deleteInfo = decodeFilesDeleteCallback(data);
+    if (deleteInfo !== null) {
+      if (!(await isWithinAllowedRootSafe(deleteInfo.path))) {
+        await alert(ctx, "files.access_denied");
+        return true;
+      }
+      await showDeleteConfirmation(ctx, deleteInfo.path, deleteInfo.page);
+      return true;
+    }
+
+    const deleteConfirm = decodeFilesDeleteConfirmCallback(data);
+    if (deleteConfirm !== null) {
+      if (!(await isWithinAllowedRootSafe(deleteConfirm.path))) {
+        await alert(ctx, "files.access_denied");
+        return true;
+      }
+      await deleteEntryAndRefresh(ctx, deleteConfirm.path, deleteConfirm.page);
+      return true;
+    }
+
+    const deleteCancel = decodeFilesDeleteCancelCallback(data);
+    if (deleteCancel !== null) {
+      if (!(await isWithinAllowedRootSafe(deleteCancel.path))) {
+        await alert(ctx, "files.access_denied");
+        return true;
+      }
+      await navigateTo(ctx, getParentPath(deleteCancel.path), deleteCancel.page);
+      return true;
+    }
+
     return false;
   } catch (error) {
     logger.error("[Files] Error handling callback:", error);
@@ -190,4 +227,42 @@ async function downloadFileAndClose(
   clearRemoteDirectory(ctx.from?.id);
   clearFilesPathIndex();
   await ctx.deleteMessage().catch(() => {});
+}
+
+async function showDeleteConfirmation(
+  ctx: Context,
+  entryPath: string,
+  page: number,
+): Promise<void> {
+  const target = await getRemoteDeleteTarget(entryPath);
+  if (target === null) {
+    await ctx.answerCallbackQuery({ text: t("commands.download.not_found") });
+    return;
+  }
+
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(buildFilesDeleteConfirmText(entryPath, target), {
+    parse_mode: "HTML",
+    reply_markup: buildFilesDeleteConfirmKeyboard(entryPath, page),
+  });
+}
+
+async function deleteEntryAndRefresh(ctx: Context, entryPath: string, page: number): Promise<void> {
+  const result = await deleteRemoteEntry(entryPath);
+
+  if ("error" in result) {
+    const isNotEmpty = result.error === "Directory is not empty";
+    await ctx.answerCallbackQuery({
+      text: isNotEmpty
+        ? t("files.delete_not_empty")
+        : t("files.delete_failed", { error: result.error }),
+    });
+    return;
+  }
+
+  await ctx.answerCallbackQuery({ text: t("files.delete_done", { name: result.name }) });
+  logger.info(`[Files] User ${ctx.from?.id} deleted ${result.target}: ${result.fullPath}`);
+
+  clearFilesPathIndex();
+  await navigateTo(ctx, getParentPath(entryPath), page);
 }

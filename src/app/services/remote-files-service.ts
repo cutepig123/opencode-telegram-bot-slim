@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import path from "node:path";
 import {
   getParentPath,
   isAllowedRoot,
@@ -212,6 +213,73 @@ export function resolveRemoteDirectory(userId: number | undefined): string | nul
   }
 
   return null;
+}
+
+export type RemoteDeleteTarget = "file" | "directory";
+
+export interface RemoteDeleteResult {
+  name: string;
+  fullPath: string;
+  target: RemoteDeleteTarget;
+}
+
+/**
+ * Removes a file, or a directory only when it is empty.
+ *
+ * A recursive delete is deliberately not offered: one mis-tap in a chat should not
+ * be able to wipe a tree, and the caller only ever confirms a single visible name.
+ */
+export async function deleteRemoteEntry(
+  entryPath: string,
+): Promise<RemoteDeleteResult | { error: string }> {
+  let stat;
+  try {
+    stat = await fs.lstat(entryPath);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Unknown error" };
+  }
+
+  const name = path.basename(entryPath);
+
+  if (stat.isDirectory()) {
+    try {
+      const children = await fs.readdir(entryPath);
+      if (children.length > 0) {
+        return { error: "Directory is not empty" };
+      }
+      await fs.rmdir(entryPath);
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : "Unknown error" };
+    }
+    return { name, fullPath: entryPath, target: "directory" };
+  }
+
+  if (!stat.isFile() && !stat.isSymbolicLink()) {
+    return { error: "Path is not a file or directory" };
+  }
+
+  try {
+    await fs.unlink(entryPath);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Unknown error" };
+  }
+
+  return { name, fullPath: entryPath, target: "file" };
+}
+
+export async function getRemoteDeleteTarget(entryPath: string): Promise<RemoteDeleteTarget | null> {
+  try {
+    const stat = await fs.lstat(entryPath);
+    if (stat.isDirectory()) {
+      return "directory";
+    }
+    if (stat.isFile() || stat.isSymbolicLink()) {
+      return "file";
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export function __resetRemoteDirectoriesForTests(): void {

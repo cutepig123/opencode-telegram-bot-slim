@@ -17,6 +17,8 @@ import {
   resolveRemoteDirectory,
   rememberRemoteDirectory,
   clearRemoteDirectory,
+  deleteRemoteEntry,
+  getRemoteDeleteTarget,
   REMOTE_FILES_PAGE_SIZE,
   __resetRemoteDirectoriesForTests,
   scanRemoteDirectory,
@@ -146,6 +148,69 @@ describe("remote-files-service", () => {
     it("refuses a directory", async () => {
       const preview = await readTextFilePreview(rootDir);
       expect("error" in preview).toBe(true);
+    });
+  });
+
+  describe("deleteRemoteEntry", () => {
+    it("deletes a file", async () => {
+      const filePath = path.join(rootDir, "gone.txt");
+      await fs.writeFile(filePath, "bye");
+
+      const result = await deleteRemoteEntry(filePath);
+
+      expect("error" in result).toBe(false);
+      if ("error" in result) {
+        return;
+      }
+      expect(result.target).toBe("file");
+      expect(result.name).toBe("gone.txt");
+      await expect(fs.access(filePath)).rejects.toThrow();
+    });
+
+    it("deletes an empty directory", async () => {
+      const dirPath = path.join(rootDir, "empty");
+      await fs.mkdir(dirPath);
+
+      const result = await deleteRemoteEntry(dirPath);
+
+      expect("error" in result).toBe(false);
+      if ("error" in result) {
+        return;
+      }
+      expect(result.target).toBe("directory");
+      await expect(fs.access(dirPath)).rejects.toThrow();
+    });
+
+    it("refuses a directory that still has children", async () => {
+      const dirPath = path.join(rootDir, "full");
+      await fs.mkdir(dirPath);
+      await fs.writeFile(path.join(dirPath, "inner.txt"), "x");
+
+      const result = await deleteRemoteEntry(dirPath);
+
+      expect(result).toEqual({ error: "Directory is not empty" });
+      await expect(fs.access(path.join(dirPath, "inner.txt"))).resolves.toBeUndefined();
+    });
+
+    it("reports a missing path instead of throwing", async () => {
+      const result = await deleteRemoteEntry(path.join(rootDir, "nope.txt"));
+      expect("error" in result).toBe(true);
+    });
+  });
+
+  describe("getRemoteDeleteTarget", () => {
+    it("reports a file", async () => {
+      await fs.writeFile(path.join(rootDir, "f.txt"), "x");
+      expect(await getRemoteDeleteTarget(path.join(rootDir, "f.txt"))).toBe("file");
+    });
+
+    it("reports a directory", async () => {
+      await fs.mkdir(path.join(rootDir, "d"));
+      expect(await getRemoteDeleteTarget(path.join(rootDir, "d"))).toBe("directory");
+    });
+
+    it("returns null for a missing path", async () => {
+      expect(await getRemoteDeleteTarget(path.join(rootDir, "nope"))).toBeNull();
     });
   });
 
